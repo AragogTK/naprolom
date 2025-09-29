@@ -8,7 +8,7 @@ function setSpin(v){
   if(S.btnNouns)  S.btnNouns.disabled=v;
 }
 
-// Works: shows/hides and fills the error area (now null-safe, auto-creates #err)
+// Works: shows/hides and fills the error area (null-safe, auto-creates #err)
 function setErr(t){
   if(!S.err){
     const box=document.createElement("div");
@@ -100,8 +100,6 @@ async function hfRequest(modelId, body){
 }
 
 /* ===================== Task calls to HF ===================== */
-
-// Works: sentiment via text-classification (preferred)
 async function callSentimentHF(text){
   const data=await hfRequest(SENTIMENT_MODEL,{inputs:text, options:{wait_for_model:true,use_cache:false}});
   const arr=Array.isArray(data)&&Array.isArray(data[0]) ? data[0] : (Array.isArray(data)?data:[]);
@@ -117,7 +115,6 @@ async function callSentimentHF(text){
   ).then(normalizeResp);
 }
 
-// Works: POS via token-classification; counts NOUN+PROPN and maps to high/medium/low
 async function callNounsPOSHF(text){
   let lastErr=null;
   for(const m of POS_MODELS){
@@ -143,7 +140,6 @@ async function callNounsPOSHF(text){
   return normalizeLevel(out);
 }
 
-// Works: text generation (fallback)
 async function callTextGenHF(prompt,text){
   let lastErr=null;
   for(const m of TEXTGEN_MODELS){
@@ -164,16 +160,10 @@ async function callTextGenHF(prompt,text){
 }
 
 /* ===================== UI Actions (HF-only) ===================== */
-
-// Works: shows a random review and resets badges (now null-safe for #text)
+// Uses a fixed in-card field (#reviewDisplay if present)
 function rand(){
   if(!S.reviews.length){ setErr("No reviews loaded."); return; }
-  if(!S.textEl){
-    const pre=document.createElement("pre");
-    pre.id="text";
-    document.body.appendChild(pre);
-    S.textEl=pre;
-  }
+  if(!S.textEl){ setErr("Missing review field (#reviewDisplay or #text)."); return; }
   const i=Math.floor(Math.random()*S.reviews.length);
   S.textEl.textContent=S.reviews[i].text||"";
   if(S.sent){
@@ -188,7 +178,6 @@ function rand(){
   setErr("");
 }
 
-// Works: HF-only — sentiment via classification model; with generative fallback
 async function onSent(){
   const txt=(S.textEl?.textContent||"").trim();
   if(!txt){ setErr("Select a review first."); return; }
@@ -209,7 +198,6 @@ async function onSent(){
   }
 }
 
-// Works: HF-only — nouns via POS model; if unavailable, use HF generative model
 async function onNouns(){
   const txt=(S.textEl?.textContent||"").trim();
   if(!txt){ setErr("Select a review first."); return; }
@@ -241,7 +229,6 @@ function fetchTSV(url){
   });
 }
 async function loadTSV(){
-  // Если файл лежит рядом с index.html на GitHub Pages — достаточно этого пути
   const candidates=["reviews_test.tsv","./reviews_test.tsv"];
   for(const c of candidates){
     try{
@@ -253,10 +240,10 @@ async function loadTSV(){
 }
 
 /* ===================== Init ===================== */
-// Works: initializes DOM refs, handlers, and data; supports ids "token" and "tokenInput"
 function init(){
   S.reviews=[];
-  S.textEl=document.getElementById("text");
+  // Prefer in-card field id="reviewDisplay"; fallback to legacy id="text"
+  S.textEl=document.getElementById("reviewDisplay")||document.getElementById("text");
   S.err=document.getElementById("err")||document.getElementById("error")||document.getElementById("errorBox");
   S.spin=document.getElementById("spin");
   S.btnRandom=document.getElementById("btnRandom");
@@ -275,11 +262,9 @@ function init(){
       S.reviews=await loadTSV();
       rand();
     } catch(e){
-      // This no longer crashes if #err is missing
       setErr("Failed to load TSV: "+e.message);
     }
   })();
 }
 
-// Works: calls init after DOM is loaded
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
