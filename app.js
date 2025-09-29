@@ -178,4 +178,81 @@ function rand(){
 }
 
 // Works: HF-only — sentiment via classification model; with generative fallback
-asy
+async function onSent(){
+  const txt=S.textEl.textContent.trim();
+  if(!txt){ setErr("Select a review first."); return; }
+  setErr(""); setSpin(true);
+  try{
+    const lbl=await callSentimentHF(txt);
+    const [ico,cls,face]=mapSentIcon(lbl);
+    S.sent.querySelector("span").textContent="Sentiment: "+ico;
+    S.sent.className="pill "+cls;
+    S.sent.querySelector("i").className=face;
+    S.sent.title=`model: ${ACTIVE_SENT_MODEL||ACTIVE_TEXTGEN_MODEL}`;
+  }catch(e){
+    setErr(e.message);
+  } finally{
+    setSpin(false);
+  }
+}
+
+// Works: HF-only — nouns via POS model; if unavailable, use HF generative model
+async function onNouns(){
+  const txt=S.textEl.textContent.trim();
+  if(!txt){ setErr("Select a review first."); return; }
+  setErr(""); setSpin(true);
+  try{
+    const lvl=await callNounsPOSHF(txt);
+    const [ico,cls]=mapNounIcon(lvl);
+    S.nouns.querySelector("span").textContent="Noun level: "+ico;
+    S.nouns.className="pill "+cls;
+    S.nouns.title=`model: ${ACTIVE_POS_MODEL||ACTIVE_TEXTGEN_MODEL}`;
+  }catch(e){
+    setErr(e.message);
+  } finally{
+    setSpin(false);
+  }
+}
+
+/* ===================== TSV loading (unchanged) ===================== */
+function fetchTSV(url){
+  return new Promise((res,rej)=>{
+    if(typeof Papa==="undefined"){ rej(new Error("Papa Parse not loaded")); return; }
+    Papa.parse(url,{
+      download:true, delimiter:"\t", header:true, skipEmptyLines:true,
+      complete:r=>{ const rows=(r.data||[]).filter(x=>x&&x.text); res(rows); },
+      error:e=>rej(e)
+    });
+  });
+}
+async function loadTSV(){
+  const candidates=["./reviews_test.tsv","./reviews_test (1).tsv","./reviews_test%20(1).tsv"];
+  for(const c of candidates){
+    try{ const rows=await fetchTSV(c); if(rows.length) return rows; }catch(_){}
+  }
+  throw new Error("TSV not found");
+}
+
+/* ===================== Init ===================== */
+// Works: initializes DOM refs, handlers, and data; supports ids "token" and "tokenInput"
+function init(){
+  S.reviews=[];
+  S.textEl=document.getElementById("text");
+  S.err=document.getElementById("err");
+  S.spin=document.getElementById("spin");
+  S.btnRandom=document.getElementById("btnRandom");
+  S.btnSent=document.getElementById("btnSent");
+  S.btnNouns=document.getElementById("btnNouns");
+  S.token=document.getElementById("token")||document.getElementById("tokenInput");
+  S.sent=document.getElementById("sent");
+  S.nouns=document.getElementById("nouns");
+
+  S.btnRandom.addEventListener("click",rand);
+  S.btnSent.addEventListener("click",onSent);
+  S.btnNouns.addEventListener("click",onNouns);
+
+  (async()=>{ try{ S.reviews=await loadTSV(); rand(); } catch(e){ setErr("Failed to load TSV: "+e.message); } })();
+}
+
+// Works: calls init after DOM is loaded
+if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
