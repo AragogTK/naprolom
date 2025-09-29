@@ -38,18 +38,32 @@
     <button id="btnNouns">Count Nouns</button>
     <i id="spin" class="spinner fa-solid fa-spinner fa-spin"></i>
   </div>
-  <div id="err" class="err"></div>
+
+  <!-- Контейнер ошибок: app.js ищет #err -->
+  <div id="err" class="err" aria-live="polite"></div>
+
   <div class="card">
     <div class="label">Review</div>
-    <div id="review" class="review fine muted">Load a random review to begin.</div>
+    <!-- ВАЖНО: id="text" (раньше было id="review") -->
+    <div id="text" class="review fine muted">Load a random review to begin.</div>
+
     <div class="grid">
       <div class="label">Sentiment</div>
-      <div class="pill"><span id="sentIcon">—</span></div>
+      <!-- ВАЖНО: контейнер #sent с <i> и <span> -->
+      <div id="sent" class="pill">
+        <i class="fa-regular fa-face-meh"></i>
+        <span>Sentiment: —</span>
+      </div>
+
       <div class="label">Nouns</div>
-      <div class="pill"><span id="nounIcon">—</span></div>
+      <!-- ВАЖНО: контейнер #nouns со <span> -->
+      <div id="nouns" class="pill">
+        <span>Noun level: —</span>
+      </div>
     </div>
   </div>
 </div>
+
 <script src="app.js" defer></script>
 </body>
 </html>
