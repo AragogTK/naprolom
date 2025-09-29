@@ -1,53 +1,181 @@
-const S={reviews:[],currentText:""};
-const $=id=>document.getElementById(id);
-const els={token:$("token"),btnRandom:$("btnRandom"),btnSent:$("btnSent"),btnNouns:$("btnNouns"),spin:$("spin"),err:$("err"),review:$("review"),sentIcon:$("sentIcon"),nounIcon:$("nounIcon")};
-const MODEL_URL="https://api-inference.huggingface.co/models/tiiuae/falcon-7b-instruct";
-function setSpin(v){els.spin.style.display=v?"inline-block":"none";els.btnRandom.disabled=v;els.btnSent.disabled=v;els.btnNouns.disabled=v}
-function setErr(t){if(!t){els.err.style.display="none";els.err.textContent="";return}els.err.style.display="block";els.err.textContent=t}
-function setReview(t){S.currentText=t;els.review.textContent=t;els.review.classList.remove("muted")}
-function randItem(a){return a[Math.floor(Math.random()*a.length)]}
-Papa.parse("reviews_test.tsv",{download:true,header:true,delimiter:"\t",skipEmptyLines:true,complete:r=>{S.reviews=(r.data||[]).map(x=>x.text).filter(Boolean);[els.btnRandom,els.btnSent,els.btnNouns].forEach(b=>b.disabled=false)},error:e=>setErr("Failed to load TSV")});
-els.btnRandom.onclick=()=>{if(!S.reviews.length){setErr("No data");return}setErr("");setReview(randItem(S.reviews))};
-els.btnSent.onclick=async()=>{if(!S.currentText){els.btnRandom.click()}setErr("");setSpin(true);try{const prompt="Classify this review as positive, negative, or neutral: ";const out=await callApi(prompt,S.currentText);const modelLabel=extractLabel(out,["positive","negative","neutral"]);const icon=modelLabel==="positive"?"👍":modelLabel==="negative"?"👎":modelLabel==="neutral"?"❓":"❓";els.sentIcon.textContent=icon;const local=localSentiment(S.currentText);els.sentIcon.title="local "+(local.score>=0?"positive":"negative")+" "+Math.round(local.confidence*100)+"%"}catch(e){const local=localSentiment(S.currentText);els.sentIcon.textContent=local.score>=0?"👍":"👎";els.sentIcon.title="fallback local"}finally{setSpin(false)}};
-els.btnNouns.onclick=async()=>{if(!S.currentText){els.btnRandom.click()}setErr("");setSpin(true);try{const prompt="Count the nouns in this review and return only High (>15), Medium (6-15), or Low (<6). ";const out=await callApi(prompt,S.currentText);const lbl=extractLabel(out,["high","medium","low","many","few"]);const norm=lbl==="many"?"high":lbl==="few"?"low":lbl;els.nounIcon.textContent=norm==="high"?"🟢":norm==="medium"?"🟡":norm==="low"?"🔴":"🔴"}catch(e){const local=nounLevel(S.currentText);els.nounIcon.textContent=local==="high"?"🟢":local==="medium"?"🟡":"🔴"}finally{setSpin(false)}};
-async function callApi(prefix,text){const body={inputs:prefix+text};const headers={"Content-Type":"application/json","Accept":"application/json"};const t=els.token.value.trim();if(t)headers.Authorization="Bearer "+t;const r=await fetch(MODEL_URL,{method:"POST",headers,body:JSON.stringify(body)});if(r.status===402){setErr("402 Payment required or gated model");throw new Error("402")}if(r.status===429){setErr("429 Rate limit");throw new Error("429")}if(r.status===503){setErr("503 Model loading");throw new Error("503")}if(!r.ok){setErr("API error "+r.status);throw new Error(String(r.status))}const j=await r.json();const t1=Array.isArray(j)&&j.length&&j[0].generated_text?String(j[0].generated_text):typeof j.generated_text==="string"?j.generated_text:JSON.stringify(j);return t1}
-function extractLabel(s,labels){const L=labels.map(x=>x.toLowerCase());const txt=String(s||"").toLowerCase();for(const l of L){if(txt.includes(l))return l}const first=(txt.split(/\r?\n/)[0]||"").trim();for(const l of L){if(first===l||first.startsWith(l))return l}return""}
-function localSentiment(raw){const text=String(raw||"");const cleaned=text.replace(/https?:\/\/\S+/gi," ").replace(/\S+@\S+\.\S+/g," ").replace(/@\w+/g," ").toLowerCase();
-const tokens=Array.from(cleaned.matchAll(/[\p{L}]+|[.!?,:;]|[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu)).map(m=>m[0]);
-const negators=new Set(["не","нет","no","not","never"]);
-const intensifiers=new Set(["very","очень"]);
-const mitigators=new Set(["slightly","немного","чуть"]);
-const posLex={"good":1,"great":1.5,"love":1.6,"excellent":1.8,"amazing":1.8,"wonderful":1.6,"delicious":1.4,"like":0.8,"recommend":1.2,"best":1.4,"perfect":1.6,"refreshing":1.2,"better":0.8,"lol":0.3,"супер":1.5,"класс":1.2,"нравится":1.2,"люблю":1.6,"отличный":1.5,"отлично":1.5,"хороший":1.0,"хорошо":1.0,"прекрасно":1.6,"рекомендую":1.2,"удобно":0.8,"легко":0.8,"вкусно":1.4,"👍":1,"😊":1,"❤️":1.8,"😍":1.6,"😂":0.4,"😁":0.8,"🙂":0.6,"⭐":1};
-const negLex={"bad":-1.2,"terrible":-1.8,"awful":-1.7,"hate":-1.6,"worst":-1.8,"poor":-1.0,"disgusting":-1.6,"gross":-1.4,"harsh":-0.8,"greasy":-1.2,"problem":-0.7,"problems":-0.7,"smells":-0.6,"tastes":-0.6,"isnt":-0.4,"wasnt":-0.4,"dont":-0.4,"can't":-0.4,"cannot":-0.4,"плохо":-1.0,"плохой":-1.0,"ужасно":-1.7,"ненавижу":-1.6,"худший":-1.8,"жирный":-0.8,"проблема":-0.7,"проблемы":-0.7,"резкий":-0.7,"воняет":-1.4,"невкусно":-1.4,"тяжелый":-0.6,"👎":-1,"😡":-1.5,"😠":-1.2,"😞":-1,"😢":-0.8,"🤮":-1.6,"☹":-0.8};
-function lemma(w){if(!w)return w;let s=w.toLowerCase();if(/[a-z]/.test(s)){if(s.endsWith("ies")&&s.length>4)s=s.slice(0,-3)+"y";else if(s.endsWith("ing")&&s.length>5)s=s.slice(0,-3);else if(s.endsWith("ed")&&s.length>4)s=s.slice(0,-2);else if(s.endsWith("es")&&s.length>3)s=s.slice(0,-2);else if(s.endsWith("s")&&s.length>3)s=s.slice(0,-1);s=s.replace(/[^a-z]/g,"")}else{s=s.replace(/[^а-яё]/g,"");const ends=["иями","ями","ами","иями","иях","иях","ией","ием","ию","ии","ие","ий","ого","ему","ыми","ыми","ые","ая","ою","ую","ый","ий","ое","его","ому","ами","ями","ах","ях","ов","ев","ом","ем","а","я","у","ю","о","е","ы","и","ь","ия","ие"];for(const e of ends){if(s.endsWith(e)&&s.length>3){s=s.slice(0,-e.length);break}}}return s}
-let rawScore=0,considered=0;
-const excl=Math.min(3,(text.match(/!/g)||[]).length);
-const exclMul=1+0.1*excl;
-let lastNegDist=Infinity;
-for(let i=0;i<tokens.length;i++){
-  const tok=tokens[i];
-  if(/[.!?,:;]/.test(tok)){lastNegDist=Infinity;continue}
-  const isWord=/[\p{L}]/u.test(tok);
-  const base=isWord?lemma(tok):tok;
-  if(negators.has(base)){lastNegDist=0;continue}
-  if(lastNegDist<Infinity)lastNegDist++;
-  let w=0;
-  if(posLex[base])w=posLex[base];
-  else if(negLex[base])w=negLex[base];
-  if(w!==0){
-    if(lastNegDist>=1&&lastNegDist<=3)w*=-1;
-    const prev=tokens[i-1]?lemma(tokens[i-1]):"";
-    if(intensifiers.has(prev))w*=1.5;
-    if(mitigators.has(prev))w*=0.6;
-    w*=exclMul;
-    rawScore+=w;
-    considered++;
+const S={};
+
+// Works: controls loading indicator and disables/enables buttons
+function setSpin(v){
+  S.spin.style.display=v?"inline-flex":"none";
+  S.btnRandom.disabled=v; S.btnSent.disabled=v; S.btnNouns.disabled=v;
+}
+
+// Works: shows/hides and fills the error area
+function setErr(t){
+  if(!t){ S.err.style.display="none"; S.err.textContent=""; return; }
+  S.err.style.display="block"; S.err.textContent=t;
+}
+
+// Works: maps sentiment label → icon/class/fontawesome icon
+function mapSentIcon(lbl){
+  if(lbl==="positive")return["👍","good","fa-regular fa-face-smile"];
+  if(lbl==="negative")return["👎","bad","fa-regular fa-face-frown"];
+  if(lbl==="neutral") return["❓","warn","fa-regular fa-face-meh"];
+  return["❓","warn","fa-regular fa-face-meh"];
+}
+
+// Works: maps noun level → icon/class
+function mapNounIcon(lbl){
+  if(lbl==="high"||lbl==="many")return["🟢","good"];
+  if(lbl==="medium")return["🟡","warn"];
+  if(lbl==="low"||lbl==="few")return["🔴","bad"];
+  return["—","warn"];
+}
+
+// Works: takes the first line, lowercases, and trims
+function firstLineLower(t){ return (t||"").split(/\r?\n/)[0].toLowerCase().trim(); }
+
+// Works: normalizes model response to positive/negative/neutral
+function normalizeResp(raw){
+  let s=firstLineLower(raw).replace(/^[^a-zа-яё]+/i,"");
+  if(/positive|positif|положит|хорош|good/.test(s))return"positive";
+  if(/negative|negatif|отрицат|плох|bad/.test(s))return"negative";
+  if(/neutral|нейтр/.test(s))return"neutral";
+  return s;
+}
+
+// Works: normalizes many/high/medium/low according to rules
+function normalizeLevel(raw){
+  let s=firstLineLower(raw);
+  if(/\b(high|many|>?\s*15|\bmore than 15\b|более\s*15|много)\b/.test(s))return"high";
+  if(/\b(medium|6-15|6 to 15|средн|от\s*6\s*до\s*15)\b/.test(s))return"medium";
+  if(/\b(low|few|<\s*6|мало|менее\s*6)\b/.test(s))return"low";
+  return s;
+}
+
+/* ===================== HF models and helpers ===================== */
+// Works: generative (fallback if task-specific models are unavailable)
+const TEXTGEN_MODELS=[
+  "HuggingFaceH4/smol-llama-3.2-1.7B-instruct",
+  "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+];
+// Works: task-specific models (often more available and faster)
+const SENTIMENT_MODEL="cardiffnlp/twitter-xlm-roberta-base-sentiment"; // multi-lang, outputs negative/neutral/positive
+const POS_MODELS=[
+  "vblagoje/bert-english-uncased-finetuned-pos",
+  "vblagoje/bert-english-cased-finetuned-pos"
+];
+
+let ACTIVE_TEXTGEN_MODEL=TEXTGEN_MODELS[0];
+let ACTIVE_SENT_MODEL=SENTIMENT_MODEL;
+let ACTIVE_POS_MODEL=POS_MODELS[0];
+
+// Works: safely reads token from input; returns Authorization header or null
+function getAuthHeader(){
+  const el=S.token;
+  const tok=el && el.value ? el.value.trim().replace(/[\s\r\n\t]+/g,"") : "";
+  return tok ? ("Bearer "+tok) : null;
+}
+
+// Works: generic POST to HF Inference API
+async function hfRequest(modelId, body){
+  const url=`https://api-inference.huggingface.co/models/${modelId}`;
+  const headers={
+    "Accept":"application/json",
+    "Content-Type":"application/json"
+  };
+  const auth=getAuthHeader();
+  if(auth) headers["Authorization"]=auth;
+
+  const r=await fetch(url,{method:"POST",mode:"cors",cache:"no-store",headers,body:JSON.stringify(body)});
+  if(r.status===401) throw new Error("401 Unauthorized (укажите валидный HF токен hf_… с правом Read)");
+  if(r.status===402) throw new Error("402 Payment required");
+  if(r.status===429) throw new Error("429 Rate limited");
+  if(r.status===404||r.status===403) throw new Error(`Model ${modelId} unavailable (${r.status})`);
+  if(!r.ok){ const e=await r.text(); throw new Error(`API error ${r.status}: ${e.slice(0,200)}`); }
+  return r.json();
+}
+
+/* ===================== Task calls to HF ===================== */
+
+// Works: sentiment via text-classification (preferred)
+async function callSentimentHF(text){
+  const data=await hfRequest(SENTIMENT_MODEL,{inputs:text, options:{wait_for_model:true,use_cache:false}});
+  // Response may be [{label,score}, …] or [[{…}]]
+  const arr=Array.isArray(data)&&Array.isArray(data[0]) ? data[0] : (Array.isArray(data)?data:[]);
+  // Normalize labels to positive/neutral/negative
+  // cardiffnlp usually returns "positive"/"neutral"/"negative" in label
+  let best=arr.reduce((a,b)=> (a&&a.score>b.score)?a:b, null) || arr[0];
+  if(!best) throw new Error("Empty response from sentiment model");
+  const lbl=best.label.toLowerCase();
+  if(/pos/.test(lbl)) return "positive";
+  if(/neu/.test(lbl)) return "neutral";
+  if(/neg/.test(lbl)) return "negative";
+  // If unexpected labels — fall back to a generative model
+  return await callTextGenHF(
+    "Classify this review as positive, negative, or neutral. Return only one word.",
+    text
+  ).then(normalizeResp);
+}
+
+// Works: POS via token-classification; counts NOUN+PROPN and maps to high/medium/low
+async function callNounsPOSHF(text){
+  let lastErr=null;
+  for(const m of POS_MODELS){
+    try{
+      const data=await hfRequest(m,{inputs:text, options:{wait_for_model:true,use_cache:false}});
+      // Possible formats: [{entity_group, word, score, start, end}, …] or [[…]]
+      const flat=Array.isArray(data)&&Array.isArray(data[0]) ? data[0] : (Array.isArray(data)?data:[]);
+      if(!flat.length) throw new Error("Empty POS response");
+      let count=0;
+      for(const tok of flat){
+        const tag=(tok.entity_group||tok.entity||"").toUpperCase();
+        if(tag.includes("NOUN")||tag.includes("PROPN")||tag==="NN"||tag==="NNS"||tag==="NNP"||tag==="NNPS"){
+          count++;
+        }
+      }
+      ACTIVE_POS_MODEL=m;
+      return count>15?"high":count>=6?"medium":"low";
+    }catch(e){ lastErr=e; }
   }
+  // If POS models are unavailable — fallback to a generative HF model
+  const out=await callTextGenHF(
+    "Count the nouns in this review and return only High (>15), Medium (6-15), or Low (<6). Return only one of: High, Medium, Low.",
+    text
+  );
+  return normalizeLevel(out);
 }
-let score=considered?rawScore/Math.sqrt(considered):0;
-score=Math.max(-4,Math.min(4,score));
-const confidence=Math.min(1,Math.abs(score)/2);
-return{score,confidence}
+
+// Works: text generation (fallback)
+async function callTextGenHF(prompt,text){
+  let lastErr=null;
+  for(const m of TEXTGEN_MODELS){
+    try{
+      const data=await hfRequest(m,{
+        inputs:`${prompt}\n\nTEXT:\n${text}\n\nANSWER:`,
+        parameters:{ max_new_tokens:32, temperature:0, return_full_text:false },
+        options:{ wait_for_model:true, use_cache:false }
+      });
+      const txt=Array.isArray(data)&&data[0]?.generated_text
+        ? data[0].generated_text
+        : (data?.generated_text ?? (typeof data==="string"?data:JSON.stringify(data)));
+      ACTIVE_TEXTGEN_MODEL=m;
+      return txt;
+    }catch(e){ lastErr=e; }
+  }
+  throw lastErr||new Error("All text-generation models unavailable");
 }
-function nounLevel(t){const text=String(t||"");const words=Array.from(text.matchAll(/[\p{L}]+|[.!?]/gu)).map(m=>m[0]);let count=0;let start=true;const det=new Set(["a","an","the","this","that","these","those","my","our","his","her","its","their"]);for(let i=0;i<words.length;i++){const w=words[i];if(/[.!?]/.test(w)){start=true;continue}const isEn=/[a-z]/i.test(w);const isRu=/[а-яё]/i.test(w);if(isEn){const prev=words[i-1]||"";const cap=/^[A-Z]/.test(w);if(cap&&!start&&w!=="I")count++;const lower=w.toLowerCase();const suff=["tion","ment","ness","ity","ism","ist","ship","age","ance","ence","er","or"];if(suff.some(s=>lower.endsWith(s)))count++;if(det.has((prev||"").toLowerCase()))count++}else if(isRu){const prev=words[i-1]||"";const cap=/^[А-ЯЁ]/.test(w);if(cap&&!start)count++;const lw=w.toLowerCase();const ends=["ие","ия","ость","ция","ник","тель","ство","ок","ка","тие","ство","изм","логия","ент","ант","атор","ность"];if(ends.some(s=>lw.endsWith(s)))count++}start=false}
-return count>15?"high":count>=6?"medium":"low"}
+
+/* ===================== UI Actions (HF-only) ===================== */
+
+// Works: shows a random review and resets badges
+function rand(){
+  if(!S.reviews.length){ setErr("No reviews loaded."); return; }
+  const i=Math.floor(Math.random()*S.reviews.length);
+  S.textEl.textContent=S.reviews[i].text||"";
+  S.sent.querySelector("span").textContent="Sentiment: —";
+  S.sent.className="pill";
+  S.sent.querySelector("i").className="fa-regular fa-face-meh";
+  S.nouns.querySelector("span").textContent="Noun level: —";
+  S.nouns.className="pill";
+  setErr("");
+}
+
+// Works: HF-only — sentiment via classification model; with generative fallback
+asy
