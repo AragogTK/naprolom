@@ -226,7 +226,7 @@ function fetchTSV(url){
   });
 }
 async function loadTSV(){
-  const candidates=["./reviews_test.tsv","./reviews_test (1).tsv","./reviews_test%20(1).tsv"];
+  const candidates=["./reviews_test.tsv","./reviews_test.tsv","./reviews_test%20.tsv"];
   for(const c of candidates){
     try{ const rows=await fetchTSV(c); if(rows.length) return rows; }catch(_){}
   }
