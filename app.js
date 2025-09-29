@@ -256,3 +256,4 @@ function init(){
 
 // Works: calls init after DOM is loaded
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
+
