@@ -8,8 +8,10 @@ function setSpin(v){
 
 // Works: shows/hides and fills the error area
 function setErr(t){
-  if(!t){ S.err.style.display="none"; S.err.textContent=""; return; }
-  S.err.style.display="block"; S.err.textContent=t;
+  const box = S.err || document.getElementById("err");
+  if(!box){ console.warn("ERR box missing in DOM:", t); return; }
+  if(!t){ box.style.display="none"; box.textContent=""; return; }
+  box.style.display="block"; box.textContent=t;
 }
 
 // Works: maps sentiment label → icon/class/fontawesome icon
