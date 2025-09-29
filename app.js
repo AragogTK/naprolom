@@ -2,21 +2,12 @@ const S={};
 
 // Works: controls loading indicator and disables/enables buttons
 function setSpin(v){
-  if(S.spin){ S.spin.style.display=v?"inline-flex":"none"; }
-  if(S.btnRandom) S.btnRandom.disabled=v;
-  if(S.btnSent)   S.btnSent.disabled=v;
-  if(S.btnNouns)  S.btnNouns.disabled=v;
+  S.spin.style.display=v?"inline-flex":"none";
+  S.btnRandom.disabled=v; S.btnSent.disabled=v; S.btnNouns.disabled=v;
 }
 
-// Works: shows/hides and fills the error area (null-safe, auto-creates #err)
+// Works: shows/hides and fills the error area
 function setErr(t){
-  if(!S.err){
-    const box=document.createElement("div");
-    box.id="err";
-    box.style.cssText="display:none;color:#b00020;padding:.5rem;margin:.5rem 0;border:1px solid #b00020;border-radius:.25rem;";
-    document.body.appendChild(box);
-    S.err=box;
-  }
   if(!t){ S.err.style.display="none"; S.err.textContent=""; return; }
   S.err.style.display="block"; S.err.textContent=t;
 }
@@ -59,11 +50,13 @@ function normalizeLevel(raw){
 }
 
 /* ===================== HF models and helpers ===================== */
+// Works: generative (fallback if task-specific models are unavailable)
 const TEXTGEN_MODELS=[
   "HuggingFaceH4/smol-llama-3.2-1.7B-instruct",
   "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 ];
-const SENTIMENT_MODEL="cardiffnlp/twitter-xlm-roberta-base-sentiment";
+// Works: task-specific models (often more available and faster)
+const SENTIMENT_MODEL="cardiffnlp/twitter-xlm-roberta-base-sentiment"; // multi-lang, outputs negative/neutral/positive
 const POS_MODELS=[
   "vblagoje/bert-english-uncased-finetuned-pos",
   "vblagoje/bert-english-cased-finetuned-pos"
@@ -100,26 +93,34 @@ async function hfRequest(modelId, body){
 }
 
 /* ===================== Task calls to HF ===================== */
+
+// Works: sentiment via text-classification (preferred)
 async function callSentimentHF(text){
   const data=await hfRequest(SENTIMENT_MODEL,{inputs:text, options:{wait_for_model:true,use_cache:false}});
+  // Response may be [{label,score}, …] or [[{…}]]
   const arr=Array.isArray(data)&&Array.isArray(data[0]) ? data[0] : (Array.isArray(data)?data:[]);
+  // Normalize labels to positive/neutral/negative
+  // cardiffnlp usually returns "positive"/"neutral"/"negative" in label
   let best=arr.reduce((a,b)=> (a&&a.score>b.score)?a:b, null) || arr[0];
   if(!best) throw new Error("Empty response from sentiment model");
   const lbl=best.label.toLowerCase();
   if(/pos/.test(lbl)) return "positive";
   if(/neu/.test(lbl)) return "neutral";
   if(/neg/.test(lbl)) return "negative";
+  // If unexpected labels — fall back to a generative model
   return await callTextGenHF(
     "Classify this review as positive, negative, or neutral. Return only one word.",
     text
   ).then(normalizeResp);
 }
 
+// Works: POS via token-classification; counts NOUN+PROPN and maps to high/medium/low
 async function callNounsPOSHF(text){
   let lastErr=null;
   for(const m of POS_MODELS){
     try{
       const data=await hfRequest(m,{inputs:text, options:{wait_for_model:true,use_cache:false}});
+      // Possible formats: [{entity_group, word, score, start, end}, …] or [[…]]
       const flat=Array.isArray(data)&&Array.isArray(data[0]) ? data[0] : (Array.isArray(data)?data:[]);
       if(!flat.length) throw new Error("Empty POS response");
       let count=0;
@@ -133,6 +134,7 @@ async function callNounsPOSHF(text){
       return count>15?"high":count>=6?"medium":"low";
     }catch(e){ lastErr=e; }
   }
+  // If POS models are unavailable — fallback to a generative HF model
   const out=await callTextGenHF(
     "Count the nouns in this review and return only High (>15), Medium (6-15), or Low (<6). Return only one of: High, Medium, Low.",
     text
@@ -140,6 +142,7 @@ async function callNounsPOSHF(text){
   return normalizeLevel(out);
 }
 
+// Works: text generation (fallback)
 async function callTextGenHF(prompt,text){
   let lastErr=null;
   for(const m of TEXTGEN_MODELS){
@@ -160,37 +163,32 @@ async function callTextGenHF(prompt,text){
 }
 
 /* ===================== UI Actions (HF-only) ===================== */
-// Uses a fixed in-card field (#reviewDisplay if present)
+
+// Works: shows a random review and resets badges
 function rand(){
   if(!S.reviews.length){ setErr("No reviews loaded."); return; }
-  if(!S.textEl){ setErr("Missing review field (#reviewDisplay or #text)."); return; }
   const i=Math.floor(Math.random()*S.reviews.length);
   S.textEl.textContent=S.reviews[i].text||"";
-  if(S.sent){
-    S.sent.querySelector("span").textContent="Sentiment: —";
-    S.sent.className="pill";
-    S.sent.querySelector("i").className="fa-regular fa-face-meh";
-  }
-  if(S.nouns){
-    S.nouns.querySelector("span").textContent="Noun level: —";
-    S.nouns.className="pill";
-  }
+  S.sent.querySelector("span").textContent="Sentiment: —";
+  S.sent.className="pill";
+  S.sent.querySelector("i").className="fa-regular fa-face-meh";
+  S.nouns.querySelector("span").textContent="Noun level: —";
+  S.nouns.className="pill";
   setErr("");
 }
 
+// Works: HF-only — sentiment via classification model; with generative fallback
 async function onSent(){
-  const txt=(S.textEl?.textContent||"").trim();
+  const txt=S.textEl.textContent.trim();
   if(!txt){ setErr("Select a review first."); return; }
   setErr(""); setSpin(true);
   try{
     const lbl=await callSentimentHF(txt);
     const [ico,cls,face]=mapSentIcon(lbl);
-    if(S.sent){
-      S.sent.querySelector("span").textContent="Sentiment: "+ico;
-      S.sent.className="pill "+cls;
-      S.sent.querySelector("i").className=face;
-      S.sent.title=`model: ${ACTIVE_SENT_MODEL||ACTIVE_TEXTGEN_MODEL}`;
-    }
+    S.sent.querySelector("span").textContent="Sentiment: "+ico;
+    S.sent.className="pill "+cls;
+    S.sent.querySelector("i").className=face;
+    S.sent.title=`model: ${ACTIVE_SENT_MODEL||ACTIVE_TEXTGEN_MODEL}`;
   }catch(e){
     setErr(e.message);
   } finally{
@@ -198,18 +196,17 @@ async function onSent(){
   }
 }
 
+// Works: HF-only — nouns via POS model; if unavailable, use HF generative model
 async function onNouns(){
-  const txt=(S.textEl?.textContent||"").trim();
+  const txt=S.textEl.textContent.trim();
   if(!txt){ setErr("Select a review first."); return; }
   setErr(""); setSpin(true);
   try{
     const lvl=await callNounsPOSHF(txt);
     const [ico,cls]=mapNounIcon(lvl);
-    if(S.nouns){
-      S.nouns.querySelector("span").textContent="Noun level: "+ico;
-      S.nouns.className="pill "+cls;
-      S.nouns.title=`model: ${ACTIVE_POS_MODEL||ACTIVE_TEXTGEN_MODEL}`;
-    }
+    S.nouns.querySelector("span").textContent="Noun level: "+ico;
+    S.nouns.className="pill "+cls;
+    S.nouns.title=`model: ${ACTIVE_POS_MODEL||ACTIVE_TEXTGEN_MODEL}`;
   }catch(e){
     setErr(e.message);
   } finally{
@@ -217,7 +214,7 @@ async function onNouns(){
   }
 }
 
-/* ===================== TSV loading ===================== */
+/* ===================== TSV loading (unchanged) ===================== */
 function fetchTSV(url){
   return new Promise((res,rej)=>{
     if(typeof Papa==="undefined"){ rej(new Error("Papa Parse not loaded")); return; }
@@ -229,22 +226,19 @@ function fetchTSV(url){
   });
 }
 async function loadTSV(){
-  const candidates=["reviews_test.tsv","./reviews_test.tsv"];
+  const candidates=["./reviews_test.tsv"];
   for(const c of candidates){
-    try{
-      const rows=await fetchTSV(c);
-      if(rows.length) return rows;
-    }catch(_){}
+    try{ const rows=await fetchTSV(c); if(rows.length) return rows; }catch(_){}
   }
   throw new Error("TSV not found");
 }
 
 /* ===================== Init ===================== */
+// Works: initializes DOM refs, handlers, and data; supports ids "token" and "tokenInput"
 function init(){
   S.reviews=[];
-  // Prefer in-card field id="reviewDisplay"; fallback to legacy id="text"
-  S.textEl=document.getElementById("reviewDisplay")||document.getElementById("text");
-  S.err=document.getElementById("err")||document.getElementById("error")||document.getElementById("errorBox");
+  S.textEl=document.getElementById("text");
+  S.err=document.getElementById("err");
   S.spin=document.getElementById("spin");
   S.btnRandom=document.getElementById("btnRandom");
   S.btnSent=document.getElementById("btnSent");
@@ -253,18 +247,12 @@ function init(){
   S.sent=document.getElementById("sent");
   S.nouns=document.getElementById("nouns");
 
-  if(S.btnRandom) S.btnRandom.addEventListener("click",rand);
-  if(S.btnSent)   S.btnSent.addEventListener("click",onSent);
-  if(S.btnNouns)  S.btnNouns.addEventListener("click",onNouns);
+  S.btnRandom.addEventListener("click",rand);
+  S.btnSent.addEventListener("click",onSent);
+  S.btnNouns.addEventListener("click",onNouns);
 
-  (async()=>{
-    try{
-      S.reviews=await loadTSV();
-      rand();
-    } catch(e){
-      setErr("Failed to load TSV: "+e.message);
-    }
-  })();
+  (async()=>{ try{ S.reviews=await loadTSV(); rand(); } catch(e){ setErr("Failed to load TSV: "+e.message); } })();
 }
 
+// Works: calls init after DOM is loaded
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
